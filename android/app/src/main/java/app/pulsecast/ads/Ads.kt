@@ -137,12 +137,12 @@ class NativeAdPool(private val context: Context, private val onChange: () -> Uni
  * own image or video, headline, text and button.
  */
 object SponsoredPostView {
-    private val INK = Color.parseColor("#F2F2EE")
-    private val MUTED = Color.parseColor("#9A9C98")
-    private val CARD = Color.parseColor("#181B1E")
-    private val ACCENT = Color.parseColor("#B7F36B")
-
-    fun create(context: Context): NativeAdView {
+    /** Colours come from the app's current light or dark theme. */
+    fun create(context: Context, card: Int, text: Int, muted: Int, accent: Int, onAccent: Int): NativeAdView {
+        val INK = text
+        val MUTED = muted
+        val CARD = card
+        val ACCENT = accent
         fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), context.resources.displayMetrics).toInt()
         val adView = NativeAdView(context)
         val column = LinearLayout(context).apply {
@@ -168,7 +168,7 @@ object SponsoredPostView {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(200)).apply { topMargin = dp(12) }
         }
         val cta = Button(context).apply {
-            setTextColor(Color.parseColor("#0F1113"))
+            setTextColor(onAccent)
             isAllCaps = false
             background = GradientDrawable().apply { setColor(ACCENT); cornerRadius = dp(22).toFloat() }
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(12) }

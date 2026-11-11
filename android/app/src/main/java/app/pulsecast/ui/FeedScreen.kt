@@ -11,12 +11,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -39,6 +43,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -47,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
@@ -62,13 +68,6 @@ import app.pulsecast.share.ShareCard
 import java.time.Duration
 import java.time.Instant
 
-val Ink = Color(0xFF0F1113)
-val CardBg = Color(0xFF181B1E)
-val Raised = Color(0xFF1F2327)
-val Text1 = Color(0xFFF2F2EE)
-val Text2 = Color(0xFF9A9C98)
-val Accent = Color(0xFFB7F36B)
-val Line = Color(0xFF2A2E33)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,12 +79,14 @@ fun FeedScreen(vm: FeedViewModel) {
 
     LaunchedEffect(s.tab, s.topic) { listState.scrollToItem(0) }
 
-    Column(Modifier.fillMaxSize().background(Ink)) {
+    // On foldables and tablets the feed stays a readable column, centred.
+    Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.TopCenter) {
+    Column(Modifier.fillMaxHeight().widthIn(max = 680.dp).fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("PulseCast", color = Text1, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 26.sp, modifier = Modifier.weight(1f))
             IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, "Settings", tint = Text2) }
         }
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp)) {
             Tab.entries.forEach { tab ->
                 val on = s.tab == tab
                 Text(
@@ -116,7 +117,10 @@ fun FeedScreen(vm: FeedViewModel) {
                 if (s.loaded && rows.isEmpty()) {
                     item(key = "empty") {
                         Text(
-                            if (s.tab == Tab.SAVED) "Tap the star on any story to keep it here." else "No stories yet. Pull down to refresh.",
+                            when (s.tab) {
+                Tab.SAVED -> "Tap the star on any story to keep it here."
+                else -> "No stories yet. Pull down to refresh."
+            },
                             color = Text2, modifier = Modifier.padding(24.dp),
                         )
                     }
@@ -138,6 +142,7 @@ fun FeedScreen(vm: FeedViewModel) {
             }
         }
     }
+    }
 
     if (showSettings) {
         ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = CardBg, contentColor = Text1) {
@@ -150,7 +155,7 @@ fun FeedScreen(vm: FeedViewModel) {
 private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
     Text(
         label,
-        color = if (on) Ink else Text1,
+        color = if (on) OnAccent else Text1,
         fontSize = 13.sp,
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
@@ -181,11 +186,11 @@ fun PostCard(card: Card, saved: Boolean, onOpen: () -> Unit, onSave: () -> Unit,
             Text(card.topic.uppercase(), color = Accent, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
             Text("  ·  ${card.source.name}  ·  ${ago(card.publishedAt)}", color = Text2, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f))
             label(card)?.let {
-                Text(it, color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Accent).padding(horizontal = 6.dp, vertical = 2.dp))
+                Text(it, color = OnAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Accent).padding(horizontal = 6.dp, vertical = 2.dp))
             }
         }
         Text(card.headline, color = Text1, fontFamily = FontFamily.Serif, fontSize = 21.sp, lineHeight = 26.sp, modifier = Modifier.padding(top = 10.dp))
-        Text(card.summary, color = Color(0xFFC9CBC6), fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 8.dp))
+        Text(card.summary, color = Body, fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 8.dp))
         if (card.whyItMatters.isNotBlank()) {
             Column(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Raised).padding(12.dp)) {
                 Text("WHY IT MATTERS", color = Accent, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
@@ -234,11 +239,14 @@ private fun label(card: Card): String? = when {
 @Composable
 private fun SponsoredPost(vm: FeedViewModel, slot: Int, adsVersion: Int) {
     val ad = remember(slot, adsVersion) { vm.ads.adFor(slot) } ?: return
-    AndroidView(
-        factory = { SponsoredPostView.create(it) },
-        update = { SponsoredPostView.bind(it, ad) },
-        modifier = Modifier.fillMaxWidth(),
-    )
+    val p = LocalPalette.current
+    key(p.isDark) {
+        AndroidView(
+            factory = { SponsoredPostView.create(it, p.card.toArgb(), p.text1.toArgb(), p.text2.toArgb(), p.accent.toArgb(), p.onAccent.toArgb()) },
+            update = { SponsoredPostView.bind(it, ad) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable
@@ -264,6 +272,10 @@ private fun Settings(s: FeedState, vm: FeedViewModel) {
     val uri = LocalUriHandler.current
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
         Text("Settings", fontFamily = FontFamily.Serif, fontSize = 24.sp, color = Text1)
+        Text("Appearance", color = Text1, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ThemeMode.entries.forEach { mode -> Chip(mode.label, s.themeMode == mode) { vm.setThemeMode(mode) } }
+        }
         Toggle("Morning briefing", "The day's top AI stories, once a day from 7am.", s.briefing, vm::setBriefing)
         Toggle("Breaking stories", "Only for the very biggest AI news. Never at night.", s.breaking, vm::setBreaking)
         if (activity != null && AdsSetup.privacyOptionsRequired(activity)) {
@@ -285,7 +297,7 @@ private fun Toggle(title: String, detail: String, on: Boolean, onChange: (Boolea
             Text(detail, color = Text2, fontSize = 12.sp)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = on, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = Accent, checkedThumbColor = Ink))
+        Switch(checked = on, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = Accent, checkedThumbColor = OnAccent))
     }
 }
 

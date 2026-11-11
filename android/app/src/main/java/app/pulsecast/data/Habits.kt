@@ -57,6 +57,11 @@ class Habits(context: Context) {
         get() = prefs.getString("lastBreaking", null)
         set(v) = prefs.edit().putString("lastBreaking", v).apply()
 
+    /** "SYSTEM", "LIGHT" or "DARK". */
+    var themeMode: String
+        get() = prefs.getString("theme", "SYSTEM")!!
+        set(v) = prefs.edit().putString("theme", v).apply()
+
     var lastBriefingDay: String?
         get() = prefs.getString("lastBriefingDay", null)
         set(v) = prefs.edit().putString("lastBriefingDay", v).apply()
@@ -75,4 +80,14 @@ object Ranking {
     }
 
     fun latest(cards: List<Card>) = cards.sortedByDescending { it.publishedAt }
+
+    /**
+     * "Top": the biggest stories of the last 3 days by heat (how many outlets
+     * covered them, Hacker News points, upvotes), not by how new they are.
+     */
+    fun top(cards: List<Card>, now: Instant = Instant.now()): List<Card> {
+        val recent = cards.filter { Duration.between(it.publishedAt, now).toHours() < 72 }
+        val pool = if (recent.size >= 10) recent else cards
+        return pool.sortedWith(compareByDescending<Card> { it.heat }.thenByDescending { it.publishedAt })
+    }
 }

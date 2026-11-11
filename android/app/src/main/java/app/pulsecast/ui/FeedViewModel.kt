@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Tab(val label: String) { FOR_YOU("For you"), LATEST("Latest"), SAVED("Saved") }
+enum class Tab(val label: String) { FOR_YOU("For you"), LATEST("Latest"), TOP("Top"), SAVED("Saved") }
 
 sealed interface Row {
     val key: String
@@ -39,6 +39,7 @@ data class FeedState(
     val adsVersion: Int = 0,
     val briefing: Boolean = true,
     val breaking: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 )
 
 class FeedViewModel(app: Application) : AndroidViewModel(app) {
@@ -52,6 +53,7 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
             lastVisitNewest = habits.lastVisitNewest,
             briefing = habits.briefingEnabled,
             breaking = habits.breakingEnabled,
+            themeMode = runCatching { ThemeMode.valueOf(habits.themeMode) }.getOrDefault(ThemeMode.SYSTEM),
         ),
     )
     val state: StateFlow<FeedState> = _state
@@ -103,6 +105,11 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(briefing = on) }
     }
 
+    fun setThemeMode(mode: ThemeMode) {
+        habits.themeMode = mode.name
+        _state.update { it.copy(themeMode = mode) }
+    }
+
     fun setBreaking(on: Boolean) {
         habits.breakingEnabled = on
         _state.update { it.copy(breaking = on) }
@@ -122,6 +129,7 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
         cards = when (s.tab) {
             Tab.FOR_YOU -> Ranking.forYou(cards, habits.interests())
             Tab.LATEST -> Ranking.latest(cards)
+            Tab.TOP -> Ranking.top(cards)
             Tab.SAVED -> Ranking.latest(cards.filter { it.id in s.saved })
         }
         val out = ArrayList<Row>()
