@@ -4,7 +4,8 @@ name: PulseCast feed
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # Off the hour: GitHub delays or drops jobs scheduled at :00 and :30 under load.
+    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 
 permissions:
