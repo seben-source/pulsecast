@@ -32,7 +32,7 @@ object ShareCard {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "image/png"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "${card.headline}\n${card.source.url}\n\nVia PulseCast, AI news in 30 seconds")
+            putExtra(Intent.EXTRA_TEXT, "${card.headline}\n${card.source.url}\n\nVia Prompt: AI News")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(send, "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -64,9 +64,9 @@ object ShareCard {
         }
 
         val brand = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = accent; textSize = 44f; typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD) }
-        c.drawText("PulseCast", PAD, H - 90f, brand)
+        c.drawText("> Prompt", PAD, H - 90f, brand)
         val tag = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#9A9C98"); textSize = 30f }
-        c.drawText("AI news in 30 seconds", PAD + brand.measureText("PulseCast") + 24f, H - 92f, tag)
+        c.drawText("AI news", PAD + brand.measureText("> Prompt") + 24f, H - 92f, tag)
         return bmp
     }
 

@@ -1,14 +1,16 @@
-# PulseCast: AI news, in 30 seconds a story
+# Prompt: AI News
 
-PulseCast has two parts:
+The Android app is called **Prompt** on the home screen and **Prompt: AI News** on the Play Store. The repository, feed address and workflow keep their original PulseCast names; nobody sees those.
 
-- **`engine/`** is the news engine. Every 30 minutes it collects AI news from 19 trusted sources. An AI model writes a short card from each real article, and the engine publishes the cards as `feed.json`.
+Prompt has two parts:
+
+- **`engine/`** is the news engine. Every 30 minutes it collects AI news from 18 trusted sources. An AI model writes a short card from each real article, and the engine publishes the cards as `feed.json`.
 - **`android/`** is the Android app. It's an Instagram-style feed of those cards, with sponsored posts (AdMob native ads) shown in the feed as regular-looking posts.
 
 ## How the news engine works
 
 1. **It collects** from:
-   - AI company blogs: OpenAI, Google DeepMind, Google, Google Research, Mistral, Hugging Face, NVIDIA, AWS, Berkeley AI Research
+   - AI company blogs: OpenAI, Google DeepMind, Google, Google Research, Mistral, Hugging Face, NVIDIA, Berkeley AI Research
    - AI journalism: TechCrunch, The Verge, Ars Technica, Wired, MIT Technology Review, The Decoder, Simon Willison
    - Hacker News, Hugging Face trending papers, and fast-rising new GitHub AI projects
 2. **It filters** out anything that isn't about AI or is more than 3 days old.
@@ -40,7 +42,7 @@ PulseCast has two parts:
   - **Latest:** newest first, with a "You're caught up" line where your last visit ended.
   - **Saved:** stories you starred.
 - **Each post shows:** topic, source and age, a headline, a 2-sentence summary, and "Why it matters". Tap a post for key points, context, what's next and the other outlets. **Read at …** opens the original article.
-- **Share** turns the post into a portrait image with the PulseCast name on it, plus a link.
+- **Share** turns the post into a portrait image with the Prompt name on it, plus a link.
 - **Notifications:**
   - A morning briefing with the day's top stories.
   - Breaking alerts for the very biggest stories only, never at night.
@@ -52,7 +54,7 @@ PulseCast has two parts:
 These turn on once you add Firebase's config file:
 
 1. Go to console.firebase.google.com and create a project. Google Analytics can be on.
-2. Add an **Android app** with the package name `app.pulsecast.ai`, then download **google-services.json**.
+2. Add an **Android app** with the package name `app.prompt.ainews`, then download **google-services.json**.
 3. Upload that file to `android/app/` in this repository (on GitHub: open the folder → Add file → Upload files).
 4. Rebuild the app. Crashes then appear under **Crashlytics**, and usage under **Analytics → Events**:
    - `card_open`, `card_save`, `card_share`, `read_source`
@@ -71,6 +73,10 @@ Without the file the app still builds and runs, and stats are simply off.
 2. In AdMob, set up the EU consent message (Privacy & messaging → GDPR).
 3. Create a Google Play developer account (one-off US$25 fee). New personal accounts need a closed test with at least 12 testers who stay opted in for 14 days before the app can go public.
 4. Use the privacy policy at `https://<your-github-name>.github.io/pulsecast/privacy.html` for the Play listing.
+
+## Store artwork
+
+`store/` has the 512×512 Play Store icon and the 1024×500 feature graphic.
 
 ## Development
 

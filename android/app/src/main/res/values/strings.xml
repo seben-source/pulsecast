@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PulseCast</string>
+    <string name="app_name">Prompt</string>
+    <!-- Full name, as on the Play Store. -->
+    <string name="store_name">Prompt: AI News</string>
 </resources>

@@ -12,7 +12,7 @@ const FRESH_HOURS = 72; // new stories must be newer than this
 const BACKFILL_IMAGES = 30; // earlier cards given a picture per run
 const PER_SOURCE = 3; // most new cards from one source per run
 const SKIP_MEMORY_DAYS = 4; // declined stories aren't re-sent to Claude for this long
-const UA = "PulseCast/1.0 (AI news reader; +https://github.com)";
+const UA = "Prompt/1.0 (AI news reader; +https://github.com/seben-source/pulsecast)";
 
 async function getText(fetchImpl, url, timeoutMs = 20_000, accept = "*/*") {
   const res = await fetchImpl(url, {

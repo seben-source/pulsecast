@@ -19,7 +19,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.pulsecast.ai"
+        // Permanent once uploaded to Google Play.
+        applicationId = "app.prompt.ainews"
         minSdk = 24
         targetSdk = 35
         versionCode = 2

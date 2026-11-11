@@ -132,7 +132,7 @@ class NativeAdPool(private val context: Context, private val onChange: () -> Uni
 }
 
 /**
- * A native ad laid out like a PulseCast post: same card, same type, with a
+ * A native ad laid out like a Prompt post: same card, same type, with a
  * clear "Sponsored" label (required by AdMob policy) and the advertiser's
  * own image or video, headline, text and button.
  */

@@ -57,7 +57,7 @@ await writeFile(join(outDir, "feed.json"), JSON.stringify(feed));
 await writeFile(join(outDir, "status.json"), JSON.stringify({ generatedAt: feed.generatedAt, stats, sources: health }, null, 1));
 await writeFile(
   join(outDir, "index.html"),
-  `<!doctype html><meta charset="utf-8"><title>PulseCast feed</title><p>PulseCast feed: ${feed.cards.length} cards, updated ${feed.generatedAt}. <a href="feed.json">feed.json</a> · <a href="status.json">status.json</a></p>`,
+  `<!doctype html><meta charset="utf-8"><title>Prompt feed</title><p>Prompt: AI News feed: ${feed.cards.length} cards, updated ${feed.generatedAt}. <a href="feed.json">feed.json</a> · <a href="status.json">status.json</a></p>`,
 );
 await writeFile(join(outDir, "privacy.html"), PRIVACY);
 console.log(`wrote ${feed.cards.length} cards to ${outDir}/feed.json`);

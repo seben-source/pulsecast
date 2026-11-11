@@ -1,4 +1,4 @@
-// Where PulseCast's news comes from. Every card links back to one of these.
+// Where Prompt's news comes from. Every card links back to one of these.
 //
 // kind:
 //   rss      RSS or Atom feed
