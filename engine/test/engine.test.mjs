@@ -183,6 +183,25 @@ test("next run: existing stories aren't rewritten, new outlets are added, old ca
   assert.equal(second.feed.cards.length, first.feed.cards.length);
 });
 
+test("declined stories are remembered and not re-sent to Claude", async () => {
+  const calls = [];
+  const first = await buildFeed({ items: allItems(), previous: null, model: fakeModel(calls), fetchImpl: fakeArticleFetch, now: NOW });
+  const sqliteless = allItems().map((i) => (i.source.id === "techcrunch" && /Old/.test(i.title) ? i : i));
+  // A story Claude declines: an AI-sounding title the fake model skips.
+  const dud = { title: "AI sourdough agents for bakeries", url: "https://example.com/dud", publishedAt: iso(2), snippet: "An AI agent bakes bread.", source: SRC.tc };
+  const calls1 = [];
+  const r1 = await buildFeed({ items: [...sqliteless, dud], previous: first.feed, model: fakeModel(calls1), fetchImpl: fakeArticleFetch, now: NOW + 1000 });
+  assert.equal(calls1.length, 1, "only the dud was new");
+  assert.equal(r1.stats.reasons["Claude skipped it"], 1);
+  assert.ok(r1.feed.skipped.some((x) => x.u === "example.com/dud"));
+  const calls2 = [];
+  await buildFeed({ items: [...sqliteless, dud], previous: r1.feed, model: fakeModel(calls2), fetchImpl: fakeArticleFetch, now: NOW + 2000 });
+  assert.equal(calls2.length, 0, "the dud isn't paid for twice");
+  const calls3 = [];
+  await buildFeed({ items: [...sqliteless, { ...dud, publishedAt: new Date(NOW + 5 * 86_400_000 - 3_600_000).toISOString() }], previous: r1.feed, model: fakeModel(calls3), fetchImpl: fakeArticleFetch, now: NOW + 5 * 86_400_000 });
+  assert.equal(calls3.length, 1, "memory expires after 4 days");
+});
+
 test("budget: only the hottest new stories are written", async () => {
   const many = Array.from({ length: 60 }, (_, i) => ({
     title: `AI story ${i}: alpha${i} beta${i} gamma${i} delta${i}`,

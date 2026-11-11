@@ -9,6 +9,7 @@ export const FEED_VERSION = 1;
 const MAX_AGE_DAYS = 10;
 const MAX_CARDS = 400;
 const FRESH_HOURS = 72; // new stories must be newer than this
+const SKIP_MEMORY_DAYS = 4; // declined stories aren't re-sent to Claude for this long
 const UA = "PulseCast/1.0 (AI news reader; +https://github.com)";
 
 async function getText(fetchImpl, url, timeoutMs = 20_000, accept = "*/*") {
@@ -78,6 +79,12 @@ function matchesCard(card, story) {
  * `model(system, user)` writes cards; `fetchImpl` is only used for article text.
  */
 export async function buildFeed({ items, previous, model, fetchImpl, now = Date.now(), maxNew = 40, log = () => {} }) {
+  const skipCutoff = now - SKIP_MEMORY_DAYS * 86_400_000;
+  const skipped = new Map(
+    (Array.isArray(previous?.skipped) ? previous.skipped : [])
+      .filter((x) => x && typeof x.u === "string" && Date.parse(x.at) >= skipCutoff)
+      .map((x) => [x.u, x.at]),
+  );
   const prevCards = Array.isArray(previous?.cards) ? previous.cards.map((c) => ({ ...c, alsoCoveredBy: [...(c.alsoCoveredBy ?? [])] })) : [];
   const fresh = items.filter((i) => {
     if (!i.source.aiOnly && !looksAboutAi(i)) return false;
@@ -91,7 +98,7 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   for (const story of stories) {
     const existing = prevCards.find((c) => matchesCard(c, story));
     if (!existing) {
-      newStories.push(story);
+      if (!story.members.some((m) => skipped.has(canonicalUrl(m.url)))) newStories.push(story);
       continue;
     }
     const known = new Set([existing.source.url, ...existing.alsoCoveredBy.map((o) => o.url)].map(canonicalUrl));
@@ -115,6 +122,7 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   let apiFailures = 0;
   let successes = 0;
   let fatal = null;
+  const reasons = {};
   const written = await mapLimit(toWrite, 4, async (story) => {
     if (fatal) return null;
     const p = story.primary;
@@ -126,11 +134,22 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
         story.articleText = "";
       }
     }
-    if (!story.articleText && !p.snippet) return null; // nothing to write from
+    if (!story.articleText && !p.snippet) {
+      // Nothing to write from (page blocked and no summary in the feed).
+      reasons["no article text"] = (reasons["no article text"] ?? 0) + 1;
+      log(`skipped (no article text): ${p.title.slice(0, 90)}`);
+      skipped.set(canonicalUrl(p.url), new Date(now).toISOString());
+      return null;
+    }
     try {
-      const body = await writeCard(story, model);
+      const { card: body, reason } = await writeCard(story, model);
       successes++;
-      if (!body) return null;
+      if (!body) {
+        reasons[reason] = (reasons[reason] ?? 0) + 1;
+        log(`skipped (${reason}): ${p.title.slice(0, 90)}`);
+        skipped.set(canonicalUrl(p.url), new Date(now).toISOString());
+        return null;
+      }
       const hn = story.members.find((m) => m.source.kind === "hn" && m.discussionUrl);
       const seen = new Set([canonicalUrl(p.url)]);
       const also = [];
@@ -173,7 +192,12 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
     .slice(0, MAX_CARDS);
 
   return {
-    feed: { version: FEED_VERSION, generatedAt: new Date(now).toISOString(), cards },
-    stats: { items: items.length, fresh: fresh.length, stories: stories.length, newStories: newStories.length, written: newCards.length, declined: toWrite.length - newCards.length, total: cards.length },
+    feed: {
+      version: FEED_VERSION,
+      generatedAt: new Date(now).toISOString(),
+      cards,
+      skipped: [...skipped].map(([u, at]) => ({ u, at })).slice(-1500),
+    },
+    stats: { items: items.length, fresh: fresh.length, stories: stories.length, newStories: newStories.length, written: newCards.length, declined: toWrite.length - newCards.length, reasons, total: cards.length },
   };
 }

@@ -79,7 +79,7 @@ export function makeModel(rawEnv, fetchImpl = fetch) {
     const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: 900, system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model, max_tokens: 1500, system, messages: [{ role: "user", content: user }] }),
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -91,9 +91,13 @@ export function makeModel(rawEnv, fetchImpl = fetch) {
 /** One story -> card body, or null if the model declines or the reply is unusable. */
 export async function writeCard(story, model) {
   const reply = await model(SYSTEM, userPrompt(story));
+  let draft;
   try {
-    return validateDraft(extractJson(reply));
+    draft = extractJson(reply);
   } catch {
-    return null;
+    return { card: null, reason: "unreadable reply" };
   }
+  if (draft?.keep !== true) return { card: null, reason: "Claude skipped it" };
+  const card = validateDraft(draft);
+  return card ? { card, reason: null } : { card: null, reason: "failed quality checks" };
 }
