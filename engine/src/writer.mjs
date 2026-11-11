@@ -79,7 +79,7 @@ export function makeModel(rawEnv, fetchImpl = fetch) {
     const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: 900, temperature: 0.2, system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model, max_tokens: 900, system, messages: [{ role: "user", content: user }] }),
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 200)}`);

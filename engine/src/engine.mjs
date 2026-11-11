@@ -110,7 +110,13 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   const toWrite = newStories.slice(0, maxNew);
   log(`stories: ${stories.length}, new: ${newStories.length}, writing: ${toWrite.length}`);
 
+  // If Claude itself rejects requests (bad key, no credit, bad setting), stop
+  // early and fail loudly instead of quietly publishing nothing.
+  let apiFailures = 0;
+  let successes = 0;
+  let fatal = null;
   const written = await mapLimit(toWrite, 4, async (story) => {
+    if (fatal) return null;
     const p = story.primary;
     if (p.source.kind === "rss" || p.source.kind === "hn") {
       try {
@@ -123,6 +129,7 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
     if (!story.articleText && !p.snippet) return null; // nothing to write from
     try {
       const body = await writeCard(story, model);
+      successes++;
       if (!body) return null;
       const hn = story.members.find((m) => m.source.kind === "hn" && m.discussionUrl);
       const seen = new Set([canonicalUrl(p.url)]);
@@ -146,9 +153,12 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
       };
     } catch (e) {
       log(`write failed for ${p.url}: ${e.message}`);
+      if (/API (40[0-3]|404)\b/.test(e.message)) apiFailures++;
+      if (apiFailures >= 3 && successes === 0) fatal = e;
       return null;
     }
   });
+  if (fatal) throw new Error(`Claude rejected every request, so nothing was published. Last error: ${fatal.message}`);
 
   const newCards = written.filter(Boolean);
   const ids = new Set();

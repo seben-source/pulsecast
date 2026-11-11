@@ -197,6 +197,26 @@ test("budget: only the hottest new stories are written", async () => {
   assert.equal(stats.written, 10);
 });
 
+test("a Claude API rejection stops the run instead of publishing nothing", async () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({
+    title: `AI story ${i}: alpha${i} beta${i} gamma${i} delta${i}`,
+    url: `https://news.example.com/ai-${i}`,
+    publishedAt: iso(1),
+    snippet: "An AI company shipped a new agent product today.",
+    source: SRC.tc,
+  }));
+  let calls = 0;
+  const rejecting = async () => {
+    calls++;
+    throw new Error('Claude API 400: {"message":"`temperature` is deprecated for this model."}');
+  };
+  await assert.rejects(
+    buildFeed({ items: many, previous: null, model: rejecting, fetchImpl: fakeArticleFetch, now: NOW }),
+    /Claude rejected every request/,
+  );
+  assert.ok(calls < 12, `stopped early (${calls} calls)`);
+});
+
 test("draft validation rejects junk and hype", () => {
   const ok = { keep: true, headline: "Google releases Gemini 4", summary: "Google released Gemini 4 today for developers and consumers. It is faster than the last version.", why_it_matters: "It competes directly with ChatGPT.", key_points: ["Released today", "Faster than before"], topic: "Nonsense", context: "", what_next: "" };
   assert.equal(validateDraft(ok).topic, "Business", "unknown topic falls back");
@@ -236,6 +256,7 @@ test("Claude adapter sends the right request", async () => {
   assert.equal(reqs[0].url, "https://api.anthropic.com/v1/messages");
   assert.equal(JSON.parse(reqs[0].init.body).model, "claude-haiku-5-5");
   assert.equal(reqs[0].init.headers["x-api-key"], "k");
+  assert.equal("temperature" in JSON.parse(reqs[0].init.body), false, "this model rejects temperature");
   assert.throws(() => makeModel({}, f));
   // Empty settings from GitHub Actions don't override the default model.
   await makeModel({ ANTHROPIC_API_KEY: "k", CLAUDE_MODEL: "" }, f)("s", "u");
