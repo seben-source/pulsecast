@@ -151,6 +151,7 @@ test("buildFeed: filters, merges, writes, and is grounded on article text", asyn
   const gpt = feed.cards.find((c) => c.originalTitle === "Introducing GPT-6");
   assert.equal(gpt.type, "release");
   assert.equal(gpt.source.url, "https://openai.com/index/introducing-gpt-6/");
+  // (The fake writer's headlines are too short for the second-pass merge; see the merge test.)
   assert.deepEqual(gpt.alsoCoveredBy.map((o) => o.name), ["TechCrunch"]);
   assert.equal(gpt.discussionUrl, "https://news.ycombinator.com/item?id=111");
   assert.equal(gpt.id, cardId(gpt.source.url));
@@ -208,7 +209,7 @@ test("budget: only the hottest new stories are written", async () => {
     url: `https://news.example.com/ai-${i}`,
     publishedAt: iso(i % 48),
     snippet: "An AI company raised money for its agent product.",
-    source: SRC.tc,
+    source: { ...SRC.tc, id: `outlet${i % 20}` },
   }));
   const calls = [];
   const { stats } = await buildFeed({ items: many, previous: null, model: fakeModel(calls), fetchImpl: fakeArticleFetch, now: NOW, maxNew: 10 });
@@ -234,6 +235,38 @@ test("a Claude API rejection stops the run instead of publishing nothing", async
     /Claude rejected every request/,
   );
   assert.ok(calls < 12, `stopped early (${calls} calls)`);
+});
+
+test("cards about the same story with different wording are merged", async () => {
+  const { mergeDuplicateCards, headlineNames } = await import("../src/curate.mjs");
+  assert.deepEqual(headlineNames("Google launches Tabletop, a shared space for AI"), ["tabletop"]);
+  const base = { type: "news", summary: "", alsoCoveredBy: [], heat: 25, publishedAt: iso(2) };
+  const cards = [
+    { ...base, id: "v", headline: "Google launches Tabletop, an experimental AI tool for building shared planning apps", source: { name: "The Verge", url: "https://theverge.com/t" } },
+    { ...base, id: "g", type: "release", headline: "Google launches Tabletop, a shared space where groups can plan together with AI prompts", source: { name: "Google", url: "https://blog.google/t" } },
+    { ...base, id: "x", headline: "Google launches Gemini 4 Carbon for developers with lower prices", source: { name: "Google", url: "https://blog.google/g" } },
+    { ...base, id: "y", headline: "Anthropic adds Tabletop-style planning to Claude", publishedAt: iso(24 * 5), source: { name: "X", url: "https://x.com/y" } },
+  ];
+  const out = mergeDuplicateCards(cards.map((c) => ({ ...c, alsoCoveredBy: [] })));
+  assert.deepEqual(out.map((c) => c.id), ["g", "x", "y"], "Verge merged into Google's own post; unrelated and old cards kept");
+  assert.deepEqual(out[0].alsoCoveredBy.map((o) => o.name), ["The Verge"]);
+  // Common names (in many cards) never trigger a merge on their own.
+  const many = Array.from({ length: 5 }, (_, i) => ({ ...base, id: `m${i}`, headline: `Startup ${i} launches Claude agent number${i} for teams`, source: { name: "S", url: `https://s.com/${i}` } }));
+  assert.equal(mergeDuplicateCards(many).length, 5);
+});
+
+test("no single source floods a run", async () => {
+  const flood = Array.from({ length: 10 }, (_, i) => ({
+    title: `AI post ${i}: alpha${i} beta${i} gamma${i} delta${i}`,
+    url: `https://blog.example.com/${i}`,
+    publishedAt: iso(1),
+    snippet: "An AI announcement with enough words to write about.",
+    source: SRC.oa,
+  }));
+  const calls = [];
+  const { stats } = await buildFeed({ items: flood, previous: null, model: fakeModel(calls), fetchImpl: fakeArticleFetch, now: NOW });
+  assert.equal(calls.length, 3);
+  assert.equal(stats.written, 3);
 });
 
 test("draft validation rejects junk and hype", () => {

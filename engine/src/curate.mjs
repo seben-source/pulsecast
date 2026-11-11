@@ -122,3 +122,67 @@ export function cardType(story) {
   if (story.primary.source.official) return "release";
   return "news";
 }
+
+/**
+ * Names in a card headline: capitalised words after the first one (Claude
+ * writes headlines in sentence case, so these are products, companies, people).
+ */
+export function headlineNames(headline) {
+  return headline
+    .split(/\s+/)
+    .slice(1)
+    .map((w) => w.replace(/[’']s$/, "").replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ""))
+    .filter((w) => w.length >= 3 && (/^[A-Z]/.test(w) || (/\d/.test(w) && /[a-z]/i.test(w))))
+    .map((w) => w.toLowerCase());
+}
+
+/**
+ * Second pass over finished cards: merges cards about the same story whose
+ * original headlines were worded too differently to match up front, e.g.
+ * "Try Tabletop: collaborative spaces..." (Google) and "Google's Tabletop AI
+ * experiment..." (The Verge). Two cards merge when, within 48 hours, they share
+ * a rare name (in at most 3 cards) and at least two other headline words.
+ * The company's own post, or else the earlier card, is kept.
+ */
+export function mergeDuplicateCards(cards) {
+  const names = cards.map((c) => new Set(headlineNames(c.headline)));
+  const df = new Map();
+  for (const set of names) for (const n of set) df.set(n, (df.get(n) ?? 0) + 1);
+  const tokens = cards.map((c) => titleTokens(c.headline));
+  const removed = new Set();
+  for (let i = 0; i < cards.length; i++) {
+    if (removed.has(i)) continue;
+    for (let j = i + 1; j < cards.length; j++) {
+      if (removed.has(j)) continue;
+      const gap = Math.abs(Date.parse(cards[i].publishedAt) - Date.parse(cards[j].publishedAt));
+      if (!(gap <= 48 * 3_600_000)) continue;
+      const rare = [...names[i]].filter((n) => names[j].has(n) && df.get(n) <= 3);
+      if (rare.length === 0) continue;
+      // Besides the name, at least two more headline words in common.
+      const rareSet = new Set(rare);
+      let shared = 0;
+      for (const t of tokens[i]) if (tokens[j].has(t) && !rareSet.has(t)) shared++;
+      if (shared < 2) continue;
+      const iWins = cards[i].type === "release" && cards[j].type !== "release"
+        ? true
+        : cards[j].type === "release" && cards[i].type !== "release"
+          ? false
+          : Date.parse(cards[i].publishedAt) <= Date.parse(cards[j].publishedAt);
+      const [keep, drop] = iWins ? [i, j] : [j, i];
+      const k = cards[keep];
+      const d = cards[drop];
+      const known = new Set([k.source.url, ...k.alsoCoveredBy.map((o) => o.url)].map(canonicalUrl));
+      for (const link of [d.source, ...(d.alsoCoveredBy ?? [])]) {
+        if (known.has(canonicalUrl(link.url))) continue;
+        known.add(canonicalUrl(link.url));
+        k.alsoCoveredBy.push({ name: link.name, url: link.url });
+      }
+      k.alsoCoveredBy = k.alsoCoveredBy.slice(0, 8);
+      k.heat = Math.max(k.heat ?? 0, d.heat ?? 0) + 4; // more outlets: a bit hotter
+      if (!k.discussionUrl && d.discussionUrl) k.discussionUrl = d.discussionUrl;
+      removed.add(drop);
+      if (drop === i) break;
+    }
+  }
+  return cards.filter((_, i) => !removed.has(i));
+}

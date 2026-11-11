@@ -19,7 +19,6 @@ export const SOURCES = [
   { id: "mistral", name: "Mistral AI", kind: "rss", url: "https://mistral.ai/news/rss", aiOnly: true, weight: 1.1, official: true },
   { id: "huggingface", name: "Hugging Face", kind: "rss", url: "https://huggingface.co/blog/feed.xml", aiOnly: true, weight: 1.0, official: true },
   { id: "nvidia", name: "NVIDIA", kind: "rss", url: "https://blogs.nvidia.com/feed/", aiOnly: false, weight: 1.0, official: true },
-  { id: "aws-ml", name: "AWS Machine Learning", kind: "rss", url: "https://aws.amazon.com/blogs/machine-learning/feed/", aiOnly: true, weight: 0.7, official: true },
   { id: "bair", name: "Berkeley AI Research", kind: "rss", url: "https://bair.berkeley.edu/blog/feed.xml", aiOnly: true, weight: 0.9, official: true },
 
   // Journalism

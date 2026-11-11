@@ -2,13 +2,14 @@
 import { createHash } from "node:crypto";
 import { SOURCES } from "./sources.mjs";
 import { parseFeed, parseHn, parseHfPapers, parseGithub, extractArticle } from "./parse.mjs";
-import { canonicalUrl, looksAboutAi, cluster, heat, cardType, similar } from "./curate.mjs";
+import { canonicalUrl, looksAboutAi, cluster, heat, cardType, similar, mergeDuplicateCards } from "./curate.mjs";
 import { writeCard } from "./writer.mjs";
 
 export const FEED_VERSION = 1;
 const MAX_AGE_DAYS = 10;
 const MAX_CARDS = 400;
 const FRESH_HOURS = 72; // new stories must be newer than this
+const PER_SOURCE = 3; // most new cards from one source per run
 const SKIP_MEMORY_DAYS = 4; // declined stories aren't re-sent to Claude for this long
 const UA = "PulseCast/1.0 (AI news reader; +https://github.com)";
 
@@ -85,7 +86,8 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
       .filter((x) => x && typeof x.u === "string" && Date.parse(x.at) >= skipCutoff)
       .map((x) => [x.u, x.at]),
   );
-  const prevCards = Array.isArray(previous?.cards) ? previous.cards.map((c) => ({ ...c, alsoCoveredBy: [...(c.alsoCoveredBy ?? [])] })) : [];
+  const activeSources = new Set(SOURCES.map((x) => x.name));
+  const prevCards = Array.isArray(previous?.cards) ? previous.cards.filter((c) => activeSources.has(c.source?.name)).map((c) => ({ ...c, alsoCoveredBy: [...(c.alsoCoveredBy ?? [])] })) : [];
   const fresh = items.filter((i) => {
     if (!i.source.aiOnly && !looksAboutAi(i)) return false;
     const t = Date.parse(i.publishedAt ?? "");
@@ -113,8 +115,18 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   }
 
   // Write the hottest new stories first, within the per-run budget.
+  // Hottest first, at most PER_SOURCE new cards from any one source per run,
+  // so a blog that posts five times in an hour can't flood the feed.
   newStories.sort((a, b) => b.heat - a.heat);
-  const toWrite = newStories.slice(0, maxNew);
+  const perSource = new Map();
+  const toWrite = [];
+  for (const story of newStories) {
+    if (toWrite.length >= maxNew) break;
+    const id = story.primary.source.id;
+    if ((perSource.get(id) ?? 0) >= PER_SOURCE) continue;
+    perSource.set(id, (perSource.get(id) ?? 0) + 1);
+    toWrite.push(story);
+  }
   log(`stories: ${stories.length}, new: ${newStories.length}, writing: ${toWrite.length}`);
 
   // If Claude itself rejects requests (bad key, no credit, bad setting), stop
@@ -182,7 +194,7 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   const newCards = written.filter(Boolean);
   const ids = new Set();
   const cutoff = now - MAX_AGE_DAYS * 86_400_000;
-  const cards = [...newCards, ...prevCards]
+  const cards = mergeDuplicateCards([...newCards, ...prevCards])
     .filter((c) => {
       if (ids.has(c.id)) return false;
       ids.add(c.id);
