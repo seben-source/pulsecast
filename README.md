@@ -76,6 +76,8 @@ Without the file the app still builds and runs, and stats are simply off.
 
 ## Store artwork
 
+Icon: a typing prompt (>_) with a small AI sparkle, green and white on dark #0F1113.
+
 `store/` has the 512×512 Play Store icon and the 1024×500 feature graphic.
 
 ## Development
