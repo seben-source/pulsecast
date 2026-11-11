@@ -27,6 +27,8 @@ data class Card(
     val discussionUrl: String?,
     val publishedAt: Instant,
     val heat: Int,
+    /** The article's own preview picture, if it has one. */
+    val image: String? = null,
 )
 
 data class Feed(val generatedAt: Instant, val cards: List<Card>)
@@ -60,6 +62,7 @@ object FeedParser {
             discussionUrl = o.optString("discussionUrl").takeIf { it.startsWith("http") },
             publishedAt = instant(o.optString("publishedAt")) ?: Instant.now(),
             heat = o.optInt("heat", 30),
+            image = o.optString("image").takeIf { it.startsWith("https://") },
         )
     }
 

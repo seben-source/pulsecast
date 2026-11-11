@@ -47,6 +47,20 @@ PulseCast has two parts:
   - Both can be turned off in Settings.
 - **Ads:** a sponsored post after every 6 stories, styled like the other posts and clearly labelled "Sponsored". There are no full-screen or pop-up ads. EU and UK users see Google's consent form first, as the law requires.
 
+### Crash reports and usage stats (Firebase)
+
+These turn on once you add Firebase's config file:
+
+1. Go to console.firebase.google.com and create a project. Google Analytics can be on.
+2. Add an **Android app** with the package name `app.pulsecast.ai`, then download **google-services.json**.
+3. Upload that file to `android/app/` in this repository (on GitHub: open the folder → Add file → Upload files).
+4. Rebuild the app. Crashes then appear under **Crashlytics**, and usage under **Analytics → Events**:
+   - `card_open`, `card_save`, `card_share`, `read_source`
+   - `tab_view`, `search`
+   - `session_depth` (how far people scroll)
+
+Without the file the app still builds and runs, and stats are simply off.
+
 ### Before publishing
 
 1. Create an AdMob account and add the app. Then replace both test IDs in `android/gradle.properties`:

@@ -4,6 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Crash reports and usage stats switch on when the Firebase config file is added.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
+}
+
 val feedUrl = providers.gradleProperty("pulsecast.feedUrl").get()
 val admobAppId = providers.gradleProperty("pulsecast.admobAppId").get()
 val nativeAdUnitId = providers.gradleProperty("pulsecast.nativeAdUnitId").get()
@@ -16,8 +22,8 @@ android {
         applicationId = "app.pulsecast.ai"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         buildConfigField("String", "FEED_URL", "\"$feedUrl\"")
         buildConfigField("String", "NATIVE_AD_UNIT_ID", "\"$nativeAdUnitId\"")
         manifestPlaceholders["admobAppId"] = admobAppId
@@ -64,4 +70,10 @@ dependencies {
     // Ads: Google Mobile Ads SDK, plus Google's consent form for EU/UK users.
     implementation("com.google.android.gms:play-services-ads:24.9.0")
     implementation("com.google.android.ump:user-messaging-platform:3.1.0")
+    // Pictures on cards.
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    // Crash reports and anonymous usage stats (active once google-services.json is added).
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-crashlytics")
 }

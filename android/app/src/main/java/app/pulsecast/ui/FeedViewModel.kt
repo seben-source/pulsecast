@@ -9,6 +9,7 @@ import app.pulsecast.data.Card
 import app.pulsecast.data.FeedRepository
 import app.pulsecast.data.Habits
 import app.pulsecast.data.Ranking
+import app.pulsecast.stats.Stats
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,10 @@ data class FeedState(
     val briefing: Boolean = true,
     val breaking: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val query: String = "",
+    val searching: Boolean = false,
+    /** When the news engine last published the feed. */
+    val generatedAt: Instant? = null,
 )
 
 class FeedViewModel(app: Application) : AndroidViewModel(app) {
@@ -61,7 +66,7 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) { repo.cached() }
-            if (cached != null) _state.update { it.copy(cards = cached.cards, loaded = true) }
+            if (cached != null) _state.update { it.copy(cards = cached.cards, loaded = true, generatedAt = cached.generatedAt) }
             refresh()
         }
     }
@@ -72,10 +77,11 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val feed = withContext(Dispatchers.IO) { repo.refresh() }
-                _state.update { it.copy(cards = feed.cards, loaded = true, refreshing = false) }
+                _state.update { it.copy(cards = feed.cards, loaded = true, refreshing = false, generatedAt = feed.generatedAt) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                Stats.problem(e)
                 _state.update {
                     it.copy(
                         loaded = true,
@@ -89,15 +95,46 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
 
     fun adsReady() = ads.start()
 
-    fun setTab(tab: Tab) = _state.update { it.copy(tab = tab) }
-    fun setTopic(topic: String?) = _state.update { it.copy(topic = topic) }
+    fun setTab(tab: Tab) {
+        _state.update { it.copy(tab = tab) }
+        Stats.event("tab_view", "tab" to tab.name.lowercase())
+    }
 
-    fun opened(card: Card) = habits.noteInterest(card.topic, 1.0)
-    fun shared(card: Card) = habits.noteInterest(card.topic, 2.0)
+    fun setTopic(topic: String?) {
+        _state.update { it.copy(topic = topic) }
+        if (topic != null) Stats.event("topic_filter", "topic" to topic)
+    }
+
+    fun setSearching(on: Boolean) = _state.update { it.copy(searching = on, query = if (on) it.query else "") }
+    fun setQuery(q: String) = _state.update { it.copy(query = q) }
+    fun searched() {
+        val q = _state.value.query.trim()
+        if (q.length >= 2) Stats.event("search", "length" to q.length)
+    }
+
+    fun opened(card: Card) {
+        habits.noteInterest(card.topic, 1.0)
+        Stats.event("card_open", "topic" to card.topic, "type" to card.type, "source" to card.source.name)
+    }
+
+    fun shared(card: Card) {
+        habits.noteInterest(card.topic, 2.0)
+        Stats.event("card_share", "topic" to card.topic)
+    }
+
+    fun readSource(card: Card) = Stats.event("read_source", "source" to card.source.name)
 
     fun toggleSave(card: Card) {
-        habits.toggleSave(card)
+        val saved = habits.toggleSave(card)
         _state.update { it.copy(saved = habits.saved) }
+        if (saved) Stats.event("card_save", "topic" to card.topic)
+    }
+
+    private var deepest = 0
+
+    /** How far down the feed the reader got this visit. */
+    fun seen(index: Int) {
+        if (index > deepest) deepest = index
     }
 
     fun setBriefing(on: Boolean) {
@@ -117,6 +154,8 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Called when the app is closed: next visit shows a "caught up" marker here. */
     fun markVisited() {
+        if (deepest > 0) Stats.event("session_depth", "items_seen" to deepest + 1)
+        deepest = 0
         val newest = _state.value.cards.maxOfOrNull { it.publishedAt } ?: return
         habits.lastVisitNewest = newest
     }
@@ -125,6 +164,20 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rows(s: FeedState): List<Row> {
         var cards = s.cards
+        val words = s.query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (s.searching && words.isNotEmpty()) {
+            // Search covers every story, newest first, whatever tab is open.
+            cards = Ranking.latest(cards.filter { c ->
+                val text = "${c.headline} ${c.summary} ${c.whyItMatters} ${c.keyPoints.joinToString(" ")} ${c.source.name} ${c.topic}".lowercase()
+                words.all { it in text }
+            })
+            val out = ArrayList<Row>()
+            cards.forEachIndexed { i, card ->
+                out.add(Row.Post(card))
+                if ((i + 1) % AD_EVERY == 0) out.add(Row.Ad(i / AD_EVERY))
+            }
+            return out
+        }
         if (s.topic != null) cards = cards.filter { it.topic == s.topic }
         cards = when (s.tab) {
             Tab.FOR_YOU -> Ranking.forYou(cards, habits.interests())

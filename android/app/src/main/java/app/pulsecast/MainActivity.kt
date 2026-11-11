@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.Modifier
 import app.pulsecast.ads.AdsSetup
+import app.pulsecast.stats.Stats
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        Stats.init(this)
         AdsSetup.start(this) { runOnUiThread { vm.adsReady() } }
         FeedCheckWorker.schedule(this)
         // Ask once for notifications so the morning briefing can arrive (Android 13+).
