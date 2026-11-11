@@ -101,3 +101,21 @@ export async function writeCard(story, model) {
   const card = validateDraft(draft);
   return card ? { card, reason: null } : { card: null, reason: "failed quality checks" };
 }
+
+export const DEDUPE_SYSTEM = `You check a news feed for duplicate stories. You get a list of AI news cards as "id | source | headline".
+Group together cards that report the SAME news event, including follow-ups about that same event from the following days (for example "X announces Y", "Y launches today" and "Shares jump after Y" are one group).
+Do NOT group cards that merely share a company or topic but are about different events (for example a company's new model and the same company's lawsuit are different).
+Return JSON only, no markdown: {"groups": [["id1","id2"], ...]}. Only include groups of 2 or more. If there are no duplicates return {"groups": []}.`;
+
+/** One request: which recent cards are the same story? Returns arrays of ids. */
+export async function findDuplicateGroups(cards, model) {
+  if (cards.length < 2) return [];
+  const list = cards.map((c) => `${c.id} | ${c.source.name} | ${c.headline}`).join("\n");
+  const reply = await model(DEDUPE_SYSTEM, list);
+  const parsed = extractJson(reply);
+  const ids = new Set(cards.map((c) => c.id));
+  return (Array.isArray(parsed?.groups) ? parsed.groups : [])
+    .filter(Array.isArray)
+    .map((g) => g.filter((id) => typeof id === "string" && ids.has(id)))
+    .filter((g) => g.length >= 2 && g.length <= 8);
+}

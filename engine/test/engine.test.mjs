@@ -127,6 +127,7 @@ const fakeArticleFetch = async (url) => {
 
 function fakeModel(calls) {
   return async (system, user) => {
+    if (system.startsWith("You check a news feed")) return '{"groups": []}';
     calls.push(user);
     const head = user.match(/^Headline: (.*)$/m)[1];
     if (/sourdough|SQLite/i.test(head)) return JSON.stringify({ keep: false });
@@ -267,6 +268,24 @@ test("no single source floods a run", async () => {
   const { stats } = await buildFeed({ items: flood, previous: null, model: fakeModel(calls), fetchImpl: fakeArticleFetch, now: NOW });
   assert.equal(calls.length, 3);
   assert.equal(stats.written, 3);
+});
+
+test("Claude's same-story check merges follow-ups and survives bad replies", async () => {
+  const { applyGroups } = await import("../src/curate.mjs");
+  const { findDuplicateGroups } = await import("../src/writer.mjs");
+  const mk = (id, headline, type = "news", heat = 30, h = 2) => ({ id, type, headline, heat, publishedAt: iso(h), source: { name: "S" + id, url: "https://s.com/" + id }, alsoCoveredBy: [] });
+  const cards = [mk("a", "Nvidia CEO admits affair with suspected spy", "news", 40), mk("b", "Nvidia shares drop 9.5% amid CEO scandal", "news", 30), mk("c", "Nvidia releases GR00T 2 robot model")];
+  const model = async () => 'Sure: {"groups": [["a","b","zzz"],["c"]]}';
+  const groups = await findDuplicateGroups(cards, model);
+  assert.deepEqual(groups, [["a", "b"]], "unknown ids and single-card groups dropped");
+  const out = applyGroups(cards, groups);
+  assert.deepEqual(out.map((c) => c.id), ["a", "c"], "hottest card kept");
+  assert.deepEqual(out[0].alsoCoveredBy.map((o) => o.name), ["Sb"]);
+  // A broken reply never breaks the run.
+  const calls = [];
+  const broken = async (system, user) => (system.startsWith("You check") ? "no json here" : fakeModel(calls)(system, user));
+  const { feed } = await buildFeed({ items: allItems(), previous: null, model: broken, fetchImpl: fakeArticleFetch, now: NOW });
+  assert.ok(feed.cards.length >= 3);
 });
 
 test("draft validation rejects junk and hype", () => {

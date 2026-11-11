@@ -169,20 +169,46 @@ export function mergeDuplicateCards(cards) {
           ? false
           : Date.parse(cards[i].publishedAt) <= Date.parse(cards[j].publishedAt);
       const [keep, drop] = iWins ? [i, j] : [j, i];
-      const k = cards[keep];
-      const d = cards[drop];
-      const known = new Set([k.source.url, ...k.alsoCoveredBy.map((o) => o.url)].map(canonicalUrl));
-      for (const link of [d.source, ...(d.alsoCoveredBy ?? [])]) {
-        if (known.has(canonicalUrl(link.url))) continue;
-        known.add(canonicalUrl(link.url));
-        k.alsoCoveredBy.push({ name: link.name, url: link.url });
-      }
-      k.alsoCoveredBy = k.alsoCoveredBy.slice(0, 8);
-      k.heat = Math.max(k.heat ?? 0, d.heat ?? 0) + 4; // more outlets: a bit hotter
-      if (!k.discussionUrl && d.discussionUrl) k.discussionUrl = d.discussionUrl;
+      mergeInto(cards[keep], cards[drop]);
       removed.add(drop);
       if (drop === i) break;
     }
   }
   return cards.filter((_, i) => !removed.has(i));
+}
+
+/** Folds card `d` into card `k`: d's outlets become "also covered by" on k. */
+export function mergeInto(k, d) {
+  const known = new Set([k.source.url, ...k.alsoCoveredBy.map((o) => o.url)].map(canonicalUrl));
+  for (const link of [d.source, ...(d.alsoCoveredBy ?? [])]) {
+    if (known.has(canonicalUrl(link.url))) continue;
+    known.add(canonicalUrl(link.url));
+    k.alsoCoveredBy.push({ name: link.name, url: link.url });
+  }
+  k.alsoCoveredBy = k.alsoCoveredBy.slice(0, 8);
+  k.heat = Math.min(100, Math.max(k.heat ?? 0, d.heat ?? 0) + 4); // more outlets: a bit hotter
+  if (!k.discussionUrl && d.discussionUrl) k.discussionUrl = d.discussionUrl;
+}
+
+/**
+ * Applies groups of card ids that are the same news story. Keeps the
+ * company's own post if there is one, else the hottest, else the newest.
+ */
+export function applyGroups(cards, groups) {
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const removed = new Set();
+  for (const group of groups) {
+    const members = [...new Set(group)].map((id) => byId.get(id)).filter((c) => c && !removed.has(c.id));
+    if (members.length < 2) continue;
+    members.sort((a, b) =>
+      (b.type === "release") - (a.type === "release") ||
+      (b.heat ?? 0) - (a.heat ?? 0) ||
+      Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+    const [keep, ...rest] = members;
+    for (const d of rest) {
+      mergeInto(keep, d);
+      removed.add(d.id);
+    }
+  }
+  return cards.filter((c) => !removed.has(c.id));
 }

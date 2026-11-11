@@ -2,8 +2,8 @@
 import { createHash } from "node:crypto";
 import { SOURCES } from "./sources.mjs";
 import { parseFeed, parseHn, parseHfPapers, parseGithub, extractArticle } from "./parse.mjs";
-import { canonicalUrl, looksAboutAi, cluster, heat, cardType, similar, mergeDuplicateCards } from "./curate.mjs";
-import { writeCard } from "./writer.mjs";
+import { canonicalUrl, looksAboutAi, cluster, heat, cardType, similar, mergeDuplicateCards, applyGroups } from "./curate.mjs";
+import { writeCard, findDuplicateGroups } from "./writer.mjs";
 
 export const FEED_VERSION = 1;
 const MAX_AGE_DAYS = 10;
@@ -194,7 +194,22 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   const newCards = written.filter(Boolean);
   const ids = new Set();
   const cutoff = now - MAX_AGE_DAYS * 86_400_000;
-  const cards = mergeDuplicateCards([...newCards, ...prevCards])
+  let merged = mergeDuplicateCards([...newCards, ...prevCards]);
+  // Claude reads the last 3 days of headlines once and groups same-story cards
+  // (catches follow-ups worded completely differently). Never fails the run.
+  const recent = merged.filter((c) => now - Date.parse(c.publishedAt) < 72 * 3_600_000).slice(0, 150);
+  let dedupeGroups = 0;
+  if (newCards.length > 0 || !previous?.dedupedAt) {
+    try {
+      const groups = await findDuplicateGroups(recent, model);
+      dedupeGroups = groups.length;
+      for (const g of groups) log(`same story: ${g.map((id) => merged.find((c) => c.id === id)?.headline.slice(0, 60)).join("  |  ")}`);
+      merged = applyGroups(merged, groups);
+    } catch (e) {
+      log(`duplicate check skipped: ${e.message}`);
+    }
+  }
+  const cards = merged
     .filter((c) => {
       if (ids.has(c.id)) return false;
       ids.add(c.id);
@@ -208,8 +223,9 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
       version: FEED_VERSION,
       generatedAt: new Date(now).toISOString(),
       cards,
+      dedupedAt: new Date(now).toISOString(),
       skipped: [...skipped].map(([u, at]) => ({ u, at })).slice(-1500),
     },
-    stats: { items: items.length, fresh: fresh.length, stories: stories.length, newStories: newStories.length, written: newCards.length, declined: toWrite.length - newCards.length, reasons, total: cards.length },
+    stats: { items: items.length, fresh: fresh.length, stories: stories.length, newStories: newStories.length, written: newCards.length, declined: toWrite.length - newCards.length, reasons, sameStoryGroups: dedupeGroups, total: cards.length },
   };
 }
