@@ -1,0 +1,7 @@
+{
+  "name": "pulsecast-engine",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node src/run.mjs", "test": "node --test test/*.test.mjs" }
+}
