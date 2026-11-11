@@ -38,7 +38,7 @@ const PAPERS = [
 
 const GITHUB = { items: [{ full_name: "acme/tiny-llm", html_url: "https://github.com/acme/tiny-llm", description: "Run a small LLM on your laptop", stargazers_count: 2400, language: "Rust", topics: ["llm"], created_at: iso(30) }] };
 
-const ARTICLE = `<html><head><script>var x=1</script></head><body><nav><p>Menu menu menu menu menu menu menu menu menu</p></nav>
+const ARTICLE = `<html><head><meta property="og:image" content="/images/gpt6.jpg"><meta name="twitter:image" content="https://cdn.example.com/t.jpg"><script>var x=1</script></head><body><nav><p>Menu menu menu menu menu menu menu menu menu</p></nav>
 <article><h1>OpenAI launches GPT-6</h1><p>OpenAI released GPT-6 on Tuesday, a model that can remember long conversations and use tools.</p>
 <p>The company said it would be available to paying ChatGPT users first, with free users getting access later this month.</p><p>short</p></article>
 <footer><p>Copyright footer text that should not be included in the article body at all.</p></footer></body></html>`;
@@ -76,6 +76,16 @@ test("article extraction keeps the article body only", () => {
   assert.match(text, /paying ChatGPT users/);
   assert.doesNotMatch(text, /Menu|Copyright|var x/);
   assert.equal(htmlToText("a &#8217; b &#x2014; c"), "a ’ b — c");
+});
+
+test("preview images: og:image first, relative URLs resolved, logos ignored", async () => {
+  const { extractImage } = await import("../src/parse.mjs");
+  assert.equal(extractImage(ARTICLE, "https://openai.com/index/x/"), "https://openai.com/images/gpt6.jpg");
+  assert.equal(extractImage(`<meta content="https://a.com/p.jpg" property="og:image">`, "https://a.com/"), "https://a.com/p.jpg", "attribute order");
+  assert.equal(extractImage(`<meta name="twitter:image" content="https://a.com/t.png">`, "https://a.com/"), "https://a.com/t.png");
+  assert.equal(extractImage(`<meta property="og:image" content="https://a.com/logo.png">`, "https://a.com/"), null);
+  assert.equal(extractImage(`<meta property="og:image" content="http://a.com/p.jpg">`, "https://a.com/"), null, "https only");
+  assert.equal(extractImage(`<p>no image</p>`, "https://a.com/"), null);
 });
 
 test("canonical URLs ignore tracking, www, trailing slash", () => {
@@ -156,6 +166,7 @@ test("buildFeed: filters, merges, writes, and is grounded on article text", asyn
   assert.deepEqual(gpt.alsoCoveredBy.map((o) => o.name), ["TechCrunch"]);
   assert.equal(gpt.discussionUrl, "https://news.ycombinator.com/item?id=111");
   assert.equal(gpt.id, cardId(gpt.source.url));
+  assert.equal(gpt.image, "https://openai.com/images/gpt6.jpg", "picture from the article page");
   assert.equal(feed.cards.find((c) => c.type === "research").originalTitle, "Scaling Laws for Reasoning Agents");
   assert.equal(feed.cards.find((c) => c.type === "tool").source.name, "GitHub");
   // The writer saw the real article, not the menu or footer.
@@ -182,6 +193,13 @@ test("next run: existing stories aren't rewritten, new outlets are added, old ca
   const gpt = second.feed.cards.find((c) => c.originalTitle === "Introducing GPT-6");
   assert.ok(gpt.alsoCoveredBy.some((o) => o.name === "Wired"));
   assert.ok(!second.feed.cards.some((c) => c.id === "old1"), "expired after 10 days");
+  // Cards made before images existed get one looked up (no Claude call).
+  const noImage = { ...first.feed, cards: first.feed.cards.map(({ image, ...c }) => c) };
+  const calls3 = [];
+  const third = await buildFeed({ items: allItems(), previous: noImage, model: fakeModel(calls3), fetchImpl: fakeArticleFetch, now: NOW + 7_200_000 });
+  assert.equal(calls3.length, 0);
+  assert.equal(third.feed.cards.find((c) => c.originalTitle === "Introducing GPT-6").image, "https://openai.com/images/gpt6.jpg");
+  assert.ok(third.feed.cards.every((c) => c.image !== undefined), "every card was tried");
   assert.equal(second.feed.cards.length, first.feed.cards.length);
 });
 

@@ -1,7 +1,7 @@
 // Collect -> curate -> write -> merge with the previous feed.
 import { createHash } from "node:crypto";
 import { SOURCES } from "./sources.mjs";
-import { parseFeed, parseHn, parseHfPapers, parseGithub, extractArticle } from "./parse.mjs";
+import { parseFeed, parseHn, parseHfPapers, parseGithub, extractArticle, extractImage } from "./parse.mjs";
 import { canonicalUrl, looksAboutAi, cluster, heat, cardType, similar, mergeDuplicateCards, applyGroups } from "./curate.mjs";
 import { writeCard, findDuplicateGroups } from "./writer.mjs";
 
@@ -9,6 +9,7 @@ export const FEED_VERSION = 1;
 const MAX_AGE_DAYS = 10;
 const MAX_CARDS = 400;
 const FRESH_HOURS = 72; // new stories must be newer than this
+const BACKFILL_IMAGES = 30; // earlier cards given a picture per run
 const PER_SOURCE = 3; // most new cards from one source per run
 const SKIP_MEMORY_DAYS = 4; // declined stories aren't re-sent to Claude for this long
 const UA = "PulseCast/1.0 (AI news reader; +https://github.com)";
@@ -138,10 +139,12 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   const written = await mapLimit(toWrite, 4, async (story) => {
     if (fatal) return null;
     const p = story.primary;
-    if (p.source.kind === "rss" || p.source.kind === "hn") {
+    if (p.source.kind === "rss" || p.source.kind === "hn" || p.source.kind === "github") {
       try {
-        const html = await getText(fetchImpl, p.url, 15_000, "text/html");
-        story.articleText = extractArticle(html.slice(0, 2_000_000));
+        const html = (await getText(fetchImpl, p.url, 15_000, "text/html")).slice(0, 2_000_000);
+        story.image = extractImage(html, p.url);
+        // GitHub projects are written from their description, not the page.
+        story.articleText = p.source.kind === "github" ? "" : extractArticle(html);
       } catch {
         story.articleText = "";
       }
@@ -181,6 +184,7 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
         addedAt: new Date(now).toISOString(),
         heat: story.heat,
         originalTitle: p.title,
+        image: story.image ?? null,
       };
     } catch (e) {
       log(`write failed for ${p.url}: ${e.message}`);
@@ -192,6 +196,17 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
   if (fatal) throw new Error(`Claude rejected every request, so nothing was published. Last error: ${fatal.message}`);
 
   const newCards = written.filter(Boolean);
+
+  // Cards from before images existed: look up their picture (no AI cost).
+  const missing = prevCards.filter((c) => c.image === undefined).slice(0, BACKFILL_IMAGES);
+  await mapLimit(missing, 6, async (c) => {
+    try {
+      const html = await getText(fetchImpl, c.source.url, 12_000, "text/html");
+      c.image = extractImage(html.slice(0, 2_000_000), c.source.url);
+    } catch {
+      c.image = null; // tried; don't retry every run
+    }
+  });
   const ids = new Set();
   const cutoff = now - MAX_AGE_DAYS * 86_400_000;
   let merged = mergeDuplicateCards([...newCards, ...prevCards]);

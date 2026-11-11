@@ -155,3 +155,29 @@ export function extractArticle(html) {
     .filter((t) => t.length > 40);
   return clip(paras.join("\n"), 7000);
 }
+
+/**
+ * The article's own preview image (what shows when the link is shared), or
+ * null. Logos, icons and SVGs are ignored.
+ */
+export function extractImage(html, pageUrl) {
+  const head = html.slice(0, 200_000);
+  const metas = [...head.matchAll(/<meta\b[^>]*>/gi)].map((m) => m[0]);
+  const attr = (tag, name) => (tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i")) || [])[1];
+  const wanted = ["og:image:secure_url", "og:image", "twitter:image", "twitter:image:src"];
+  for (const key of wanted) {
+    const tag = metas.find((t) => (attr(t, "property") ?? attr(t, "name") ?? "").toLowerCase() === key);
+    const raw = tag && attr(tag, "content");
+    if (!raw) continue;
+    let url;
+    try {
+      url = new URL(decodeEntities(raw.trim()), pageUrl).toString();
+    } catch {
+      continue;
+    }
+    if (!url.startsWith("https://")) continue;
+    if (/\.svg(\?|$)|\/(logo|favicon|icon|avatar)[^/]*\.(png|jpe?g|gif|webp)(\?|$)|default[-_]?(og|share|social)/i.test(url)) continue;
+    return url;
+  }
+  return null;
+}
