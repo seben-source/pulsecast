@@ -91,17 +91,34 @@ fun FeedScreen(vm: FeedViewModel) {
     val rows = remember(s) { vm.rows(s) }
     val listState = rememberLazyListState()
     var showSettings by remember { mutableStateOf(false) }
+    var showPro by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(s.tab, s.topic, s.searching) { listState.scrollToItem(0) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { vm.seen(it) }
     }
 
+    if (showPro) {
+        ProScreen(onClose = { showPro = false })
+        return
+    }
+
     // On foldables and tablets the feed stays a readable column, centred.
     Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.fillMaxHeight().widthIn(max = 680.dp).fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.app_name), color = Text1, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 26.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.app_name), color = Text1, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Try PRO",
+                color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, Accent, RoundedCornerShape(14.dp))
+                    .clickable { showPro = true }
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = { vm.setSearching(!s.searching) }) {
                 Icon(if (s.searching) Icons.Filled.Close else Icons.Filled.Search, if (s.searching) "Close search" else "Search", tint = Text2)
             }
@@ -191,7 +208,7 @@ fun FeedScreen(vm: FeedViewModel) {
 
     if (showSettings) {
         ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = CardBg, contentColor = Text1) {
-            Settings(s, vm)
+            Settings(s, vm, onPro = { showSettings = false; showPro = true })
         }
     }
 }
@@ -327,11 +344,25 @@ private fun EndOfFeed() {
 }
 
 @Composable
-private fun Settings(s: FeedState, vm: FeedViewModel) {
+private fun Settings(s: FeedState, vm: FeedViewModel, onPro: () -> Unit) {
     val activity = LocalContext.current as? Activity
     val uri = LocalUriHandler.current
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
         Text("Settings", fontFamily = FontFamily.Serif, fontSize = 24.sp, color = Text1)
+        Row(
+            Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Raised).clickable(onClick = onPro).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Prompt", color = Text1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(6.dp))
+                    ProBadge()
+                }
+                Text("No ads, ask about any story, instant alerts and more.", color = Text2, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+            Text("See plans", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
         Text("Appearance", color = Text1, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ThemeMode.entries.forEach { mode -> Chip(mode.label, s.themeMode == mode) { vm.setThemeMode(mode) } }
