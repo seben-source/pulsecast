@@ -40,6 +40,13 @@ class MainActivity : ComponentActivity() {
 
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    // Android often keeps the app alive in the background for hours, so onCreate
+    // doesn't run again when the user comes back. Re-check the feed on every return.
+    override fun onStart() {
+        super.onStart()
+        vm.refreshIfStale()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

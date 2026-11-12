@@ -66,13 +66,22 @@ class FeedViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) { repo.cached() }
-            if (cached != null) _state.update { it.copy(cards = cached.cards, loaded = true, generatedAt = cached.generatedAt) }
+            // Only fill from the cache if a network refresh hasn't already landed.
+            if (cached != null) _state.update { if (it.cards.isNotEmpty()) it else it.copy(cards = cached.cards, loaded = true, generatedAt = cached.generatedAt) }
             refresh()
         }
     }
 
+    private var lastRefreshAt = 0L
+
+    /** Called whenever the app comes back to the foreground. */
+    fun refreshIfStale() {
+        if (System.currentTimeMillis() - lastRefreshAt > 2 * 60_000) refresh()
+    }
+
     fun refresh() {
         if (_state.value.refreshing) return
+        lastRefreshAt = System.currentTimeMillis()
         _state.update { it.copy(refreshing = true, error = null) }
         viewModelScope.launch {
             try {
