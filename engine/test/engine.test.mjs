@@ -138,6 +138,10 @@ const fakeArticleFetch = async (url) => {
 function fakeModel(calls) {
   return async (system, user) => {
     if (system.startsWith("You check a news feed")) return '{"groups": []}';
+    if (system.startsWith('You add "What it means for you"')) {
+      (calls.angles ??= []).push(user);
+      return JSON.stringify({ developer: "Developers get a model that remembers long sessions in their own apps.", business: "", creative: "", education: "", health: "" });
+    }
     calls.push(user);
     const head = user.match(/^Headline: (.*)$/m)[1];
     if (/sourdough|SQLite/i.test(head)) return JSON.stringify({ keep: false });
@@ -150,6 +154,7 @@ function fakeModel(calls) {
       topic: "Models",
       context: "Some context.",
       what_next: "",
+      for_you: { developer: "Developers can build this into their apps from today.", business: "too short", creative: "", education: "Teachers may want to try this with a class next term.", health: "" },
     }) + "\n```";
   };
 }
@@ -350,4 +355,92 @@ test("Claude adapter sends the right request", async () => {
   // Empty settings from GitHub Actions don't override the default model.
   await makeModel({ ANTHROPIC_API_KEY: "k", CLAUDE_MODEL: "" }, f)("s", "u");
   assert.equal(JSON.parse(reqs[1].init.body).model, "claude-haiku-5-5");
+});
+
+// ---- Prompt Pro extras ----
+import { mkdtemp, readFile as readF, writeFile as writeF } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
+import { updateArchive } from "../src/archive.mjs";
+import { weeklyDue, writeWeekly, addIssue, validateIssue, localDay } from "../src/weekly.mjs";
+
+test("What it means for you: kept per field, empty and short lines dropped", async () => {
+  const calls = [];
+  const { feed } = await buildFeed({ items: allItems(), previous: null, model: fakeModel(calls), fetchImpl: fakeArticleFetch, now: NOW });
+  const gpt = feed.cards.find((c) => c.originalTitle === "Introducing GPT-6");
+  assert.deepEqual(Object.keys(gpt.forYou).sort(), ["developer", "education"]);
+  assert.equal(calls.angles, undefined, "new cards get angles in the same request, no extra call");
+});
+
+test("earlier cards get angles backfilled once, hottest first", async () => {
+  const first = await buildFeed({ items: allItems(), previous: null, model: fakeModel([]), fetchImpl: fakeArticleFetch, now: NOW });
+  const old = { ...first.feed, cards: first.feed.cards.map(({ forYou, ...c }) => c) };
+  const calls = [];
+  const second = await buildFeed({ items: allItems(), previous: old, model: fakeModel(calls), fetchImpl: fakeArticleFetch, now: NOW + 1000 });
+  assert.equal(calls.length, 0, "no card rewritten");
+  assert.equal(calls.angles.length, old.cards.length);
+  assert.ok(second.feed.cards.every((c) => c.forYou?.developer));
+  assert.equal(second.stats.anglesAdded, old.cards.length);
+  const calls3 = [];
+  await buildFeed({ items: allItems(), previous: second.feed, model: fakeModel(calls3), fetchImpl: fakeArticleFetch, now: NOW + 2000 });
+  assert.equal(calls3.angles, undefined, "not repeated");
+});
+
+const acard = (id, hoursAgo, extra = {}) => ({ id, headline: `Headline ${id}`, summary: "s", source: { name: "X", url: `https://x.com/${id}` }, publishedAt: iso(hoursAgo), heat: 50, originalTitle: "t", ...extra });
+
+test("archive: keeps every card by month, updates in place, drops merged duplicates", async () => {
+  const dir = await mkdtemp(joinPath(tmpdir(), "arch-"));
+  // NOW is 12 Nov; 300h ago is late October.
+  await updateArchive(dir, [acard("a", 1), acard("b", 5), acard("old", 300)]);
+  let nov = JSON.parse(await readF(joinPath(dir, "2026-11.json"), "utf8"));
+  assert.deepEqual(nov.cards.map((c) => c.id), ["a", "b"]);
+  assert.equal(nov.cards[0].originalTitle, undefined, "internal field not archived");
+  // Next run: "a" updated, "b" merged away (inside the window), "old" left the feed by age.
+  await updateArchive(dir, [acard("a", 1, { headline: "New A" }), acard("c", 0.5), acard("d", 200)]);
+  nov = JSON.parse(await readF(joinPath(dir, "2026-11.json"), "utf8"));
+  assert.deepEqual(nov.cards.map((c) => c.id), ["c", "a", "d"]);
+  assert.equal(nov.cards[1].headline, "New A");
+  const oct = JSON.parse(await readF(joinPath(dir, "2026-10.json"), "utf8"));
+  assert.deepEqual(oct.cards.map((c) => c.id), ["old"], "older months untouched");
+  const index = JSON.parse(await readF(joinPath(dir, "index.json"), "utf8"));
+  assert.deepEqual(index.months, [{ month: "2026-11", count: 3 }, { month: "2026-10", count: 1 }]);
+  assert.equal(index.total, 4);
+});
+
+test("weekly: due once each Brisbane Sunday", () => {
+  const sunMorning = Date.parse("2026-11-14T21:00:00Z"); // Sun 15 Nov, 7am Brisbane
+  const satNight = Date.parse("2026-11-14T12:00:00Z"); // Sat 10pm Brisbane
+  assert.deepEqual(localDay(sunMorning), { date: "2026-11-15", weekday: 0 });
+  assert.equal(weeklyDue([], satNight), false);
+  assert.equal(weeklyDue([], sunMorning), true);
+  assert.equal(weeklyDue([{ weekOf: "2026-11-15" }], sunMorning), false);
+  const issues = addIssue([{ weekOf: "2026-11-08" }], { weekOf: "2026-11-15" });
+  assert.deepEqual(issues.map((i) => i.weekOf), ["2026-11-15", "2026-11-08"]);
+});
+
+test("weekly: written only from the week's cards, unknown ids dropped", async () => {
+  const cards = Array.from({ length: 8 }, (_, i) => acard(`w${i}`, 10 + i * 5, { whyItMatters: "w", keyPoints: ["k"] }));
+  cards.push(acard("tooOld", 24 * 9));
+  let seen = "";
+  const model = async (system, user) => {
+    seen = user;
+    return JSON.stringify({
+      title: "Models got cheaper this week",
+      intro: "Three labs cut prices. Here is what that means for you.",
+      sections: [
+        { heading: "Price cuts", body: "A long enough body that explains the first thread of the week in plain English for readers.", cardIds: ["w0", "w1", "nope"] },
+        { heading: "Open models", body: "A long enough body that explains the second thread of the week in plain English for readers.", cardIds: ["w2"] },
+        { heading: "Bad", body: "too short", cardIds: ["w3"] },
+      ],
+      takeaway: "Cheaper models are coming.",
+    });
+  };
+  const issue = await writeWeekly(cards, model, NOW);
+  assert.ok(!seen.includes("tooOld"), "only the last 7 days");
+  assert.equal(issue.sections.length, 2);
+  assert.deepEqual(issue.sections[0].cardIds, ["w0", "w1"]);
+  assert.deepEqual(issue.cards.map((c) => c.id).sort(), ["w0", "w1", "w2"]);
+  assert.equal(issue.weekOf, localDay(NOW).date);
+  assert.equal(await writeWeekly(cards.slice(0, 3), model, NOW), null, "too little news");
+  assert.equal(validateIssue({ title: "A revolutionary week", intro: "x".repeat(50), sections: [] }, new Set()), null);
 });

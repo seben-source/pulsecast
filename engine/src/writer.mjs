@@ -2,6 +2,9 @@
 
 export const TOPICS = ["Models", "Tools", "Research", "Business", "Policy", "Robotics", "Chips", "Open source", "Creative"];
 
+/** Prompt Pro "What it means for you": one short angle per field. Keys are stable; the app shows the labels. */
+export const FIELDS = ["developer", "business", "creative", "education", "health"];
+
 export const SYSTEM = `You write cards for Prompt, a feed that explains AI news to curious non-experts.
 You are given one story: its headline, source and the article text. Write ONLY from that text.
 Never add facts, numbers, names, quotes, dates or claims that are not in the text. If the text is too thin to say anything concrete, set "keep" to false.
@@ -18,8 +21,16 @@ Return JSON only, no markdown, with exactly these fields:
   "key_points": [string, string, string], // 3 short facts from the text, max 140 characters each
   "topic": one of ${JSON.stringify(TOPICS)},
   "context": string,        // max 2 sentences: background from the text that helps understand it
-  "what_next": string       // max 2 sentences: what the text says happens next; "" if it doesn't say
-}`;
+  "what_next": string,      // max 2 sentences: what the text says happens next; "" if it doesn't say
+  "for_you": {              // 1 sentence each, max 180 characters: what this story practically means for someone working in that field
+    "developer": string,    // software developers and engineers
+    "business": string,     // business, marketing and sales people
+    "creative": string,     // writers, designers, artists, video and music makers
+    "education": string,    // students and teachers
+    "health": string        // people working in healthcare
+  }
+}
+For "for_you": stay grounded in the text; you may draw the obvious practical consequence of a fact in the text, but invent no new facts. Use "" for any field the story doesn't really affect. Do not stretch to fill every field.`;
 
 function userPrompt(story) {
   const p = story.primary;
@@ -39,7 +50,7 @@ function userPrompt(story) {
     .join("\n");
 }
 
-function extractJson(text) {
+export function extractJson(text) {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
@@ -66,7 +77,18 @@ export function validateDraft(d) {
     topic: TOPICS.includes(d.topic) ? d.topic : "Business",
     context: str(d.context, 360),
     whatNext: str(d.what_next, 360),
+    ...forYou(d.for_you),
   };
+}
+
+function forYou(v) {
+  if (!v || typeof v !== "object") return {};
+  const out = {};
+  for (const f of FIELDS) {
+    const t = str(v[f], 240);
+    if (t.length >= 20 && !/game-?changing|revolutionary|groundbreaking/i.test(t)) out[f] = t;
+  }
+  return Object.keys(out).length ? { forYou: out } : {};
 }
 
 export function makeModel(rawEnv, fetchImpl = fetch) {
@@ -75,12 +97,12 @@ export function makeModel(rawEnv, fetchImpl = fetch) {
   const key = env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set");
   const model = env.CLAUDE_MODEL || "claude-haiku-5-5";
-  return async (system, user) => {
+  return async (system, user, { maxTokens = 1500 } = {}) => {
     const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: 1500, system, messages: [{ role: "user", content: user }] }),
-      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
+      signal: AbortSignal.timeout(90_000),
     });
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
@@ -118,4 +140,22 @@ export async function findDuplicateGroups(cards, model) {
     .filter(Array.isArray)
     .map((g) => g.filter((id) => typeof id === "string" && ids.has(id)))
     .filter((g) => g.length >= 2 && g.length <= 8);
+}
+
+export const ANGLES_SYSTEM = `You add "What it means for you" lines to an AI news card for Prompt, an app for curious non-experts.
+You get the card's headline, summary, why it matters and key points. Use ONLY that text: you may draw the obvious practical consequence of a fact in it, but invent no new facts.
+For each field write 1 sentence, max 180 characters, saying what the story practically means for someone working in that field. Use "" for any field the story doesn't really affect. Do not stretch to fill every field. Plain English, no hype words, no emoji.
+Fields: developer (software developers and engineers), business (business, marketing and sales), creative (writers, designers, artists, video and music makers), education (students and teachers), health (people working in healthcare).
+Return JSON only: {"developer": string, "business": string, "creative": string, "education": string, "health": string}`;
+
+/** Angles for a card written before angles existed. Returns the map, or null if none apply. */
+export async function writeAngles(card, model) {
+  const text = [
+    `Headline: ${card.headline}`,
+    `Summary: ${card.summary}`,
+    `Why it matters: ${card.whyItMatters}`,
+    `Key points: ${(card.keyPoints ?? []).join(" / ")}`,
+  ].join("\n");
+  const reply = await model(ANGLES_SYSTEM, text, { maxTokens: 600 });
+  return forYou(extractJson(reply)).forYou ?? null;
 }

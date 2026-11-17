@@ -7,11 +7,15 @@
 //   PREV_FEED_PATH               or a local file instead
 //   OUT_DIR                      where to write feed.json (default ./site)
 //   MAX_NEW                      most new cards per run (default 40, controls AI cost)
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+//   ARCHIVE_DIR                  optional: a checkout of the repo's "archive" branch.
+//                                Holds the Pro archive and weekly issues between runs.
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { collect, buildFeed } from "./engine.mjs";
 import { makeModel } from "./writer.mjs";
 import { PRIVACY } from "./privacy.mjs";
+import { updateArchive } from "./archive.mjs";
+import { weeklyDue, writeWeekly, addIssue } from "./weekly.mjs";
 
 const env = process.env;
 const outDir = env.OUT_DIR || "site";
@@ -60,4 +64,39 @@ await writeFile(
   `<!doctype html><meta charset="utf-8"><title>Prompt feed</title><p>Prompt: AI News feed: ${feed.cards.length} cards, updated ${feed.generatedAt}. <a href="feed.json">feed.json</a> · <a href="status.json">status.json</a></p>`,
 );
 await writeFile(join(outDir, "privacy.html"), PRIVACY);
+
+// Prompt Pro extras. Failures here never stop the feed from publishing.
+if (env.ARCHIVE_DIR) {
+  const dir = env.ARCHIVE_DIR;
+  try {
+    const a = await updateArchive(join(dir, "archive"), feed.cards);
+    console.log(`archive: ${a.total} cards in ${a.months} months`);
+  } catch (e) {
+    console.log(`archive update failed: ${e.message}`);
+  }
+  const weeklyPath = join(dir, "weekly.json");
+  let weekly = { issues: [] };
+  try {
+    weekly = JSON.parse(await readFile(weeklyPath, "utf8"));
+  } catch {}
+  if (weeklyDue(weekly.issues, Date.now()) || env.FORCE_WEEKLY === "1") {
+    try {
+      const issue = await writeWeekly(feed.cards, model, Date.now());
+      if (issue) {
+        weekly = { updatedAt: new Date().toISOString(), issues: addIssue(weekly.issues, issue) };
+        await writeFile(weeklyPath, JSON.stringify(weekly));
+        console.log(`weekly: wrote "${issue.title}"`);
+      } else {
+        console.log("weekly: not enough news or reply failed checks, will retry next run");
+      }
+    } catch (e) {
+      console.log(`weekly failed (will retry next run): ${e.message}`);
+    }
+  }
+  // Publish both alongside the feed.
+  try {
+    await cp(join(dir, "archive"), join(outDir, "archive"), { recursive: true });
+  } catch {}
+  await writeFile(join(outDir, "weekly.json"), JSON.stringify(weekly));
+}
 console.log(`wrote ${feed.cards.length} cards to ${outDir}/feed.json`);

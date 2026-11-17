@@ -13,6 +13,9 @@ if (file("google-services.json").exists()) {
 val feedUrl = providers.gradleProperty("pulsecast.feedUrl").get()
 val admobAppId = providers.gradleProperty("pulsecast.admobAppId").get()
 val nativeAdUnitId = providers.gradleProperty("pulsecast.nativeAdUnitId").get()
+// Prompt Pro "Ask about this story" server (Cloudflare Worker). Blank = not set up yet.
+val askUrl = providers.gradleProperty("pulsecast.askUrl").getOrElse("")
+val askKey = providers.gradleProperty("pulsecast.askKey").getOrElse("")
 
 android {
     namespace = "app.pulsecast"
@@ -23,10 +26,12 @@ android {
         applicationId = "app.prompt.ainews"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
         buildConfigField("String", "FEED_URL", "\"$feedUrl\"")
         buildConfigField("String", "NATIVE_AD_UNIT_ID", "\"$nativeAdUnitId\"")
+        buildConfigField("String", "ASK_URL", "\"$askUrl\"")
+        buildConfigField("String", "ASK_KEY", "\"$askKey\"")
         manifestPlaceholders["admobAppId"] = admobAppId
     }
 
@@ -71,6 +76,8 @@ dependencies {
     // Ads: Google Mobile Ads SDK, plus Google's consent form for EU/UK users.
     implementation("com.google.android.gms:play-services-ads:24.9.0")
     implementation("com.google.android.ump:user-messaging-platform:3.1.0")
+    // Prompt Pro subscriptions.
+    implementation("com.android.billingclient:billing:8.3.0")
     // Pictures on cards.
     implementation("io.coil-kt:coil-compose:2.7.0")
     // Crash reports and anonymous usage stats (active once google-services.json is added).

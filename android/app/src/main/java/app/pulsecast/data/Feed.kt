@@ -29,6 +29,8 @@ data class Card(
     val heat: Int,
     /** The article's own preview picture, if it has one. */
     val image: String? = null,
+    /** Prompt Pro "What it means for you": field key -> one sentence. */
+    val forYou: Map<String, String> = emptyMap(),
 )
 
 data class Feed(val generatedAt: Instant, val cards: List<Card>)
@@ -63,6 +65,7 @@ object FeedParser {
             publishedAt = instant(o.optString("publishedAt")) ?: Instant.now(),
             heat = o.optInt("heat", 30),
             image = o.optString("image").takeIf { it.startsWith("https://") },
+            forYou = o.optJSONObject("forYou")?.let { f -> f.keys().asSequence().mapNotNull { k -> f.optString(k).takeIf { it.isNotBlank() }?.let { k to it } }.toMap() } ?: emptyMap(),
         )
     }
 

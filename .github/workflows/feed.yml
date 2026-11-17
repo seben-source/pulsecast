@@ -6,10 +6,15 @@ on:
   schedule:
     # Off the hour: GitHub delays or drops jobs scheduled at :00 and :30 under load.
     - cron: "7,37 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_weekly:
+        description: "Write this week's deep-dive now, even if it isn't Sunday"
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write # saves the Pro archive and weekly issues to the "archive" branch
   pages: write
   id-token: write
 
@@ -31,6 +36,18 @@ jobs:
           node-version: 22
       - id: pages
         uses: actions/configure-pages@v5
+      # The Pro archive and weekly issues live on their own branch so they
+      # survive every republish. Created on the first run.
+      - name: Get archive branch
+        run: |
+          url="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}"
+          if git ls-remote --exit-code --heads "$url" archive >/dev/null 2>&1; then
+            # Retry: starting without the archive would publish it half-empty.
+            for i in 1 2 3; do git clone -q --depth 1 --branch archive "$url" archive-data && break; rm -rf archive-data; sleep 10; done
+            test -d archive-data
+          else
+            mkdir archive-data && cd archive-data && git init -q -b archive && git remote add origin "$url"
+          fi
       - name: Build feed
         working-directory: engine
         run: node src/run.mjs
@@ -40,8 +57,20 @@ jobs:
           MAX_NEW: ${{ vars.MAX_NEW }}
           PREV_FEED_URL: ${{ steps.pages.outputs.base_url }}/feed.json
           OUT_DIR: ../site
+          ARCHIVE_DIR: ../archive-data
+          FORCE_WEEKLY: ${{ inputs.force_weekly && '1' || '' }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - id: deploy
         uses: actions/deploy-pages@v4
+      # After publishing, so a failed save never holds up the feed.
+      # The next run re-saves the last 10 days anyway.
+      - name: Save archive branch
+        continue-on-error: true
+        working-directory: archive-data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || { git commit -qm "Archive and weekly update" && git push -q origin HEAD:archive; }

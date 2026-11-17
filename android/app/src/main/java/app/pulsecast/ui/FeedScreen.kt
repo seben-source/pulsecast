@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -78,7 +79,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.pulsecast.ads.AdsSetup
 import app.pulsecast.ads.SponsoredPostView
+import app.pulsecast.BuildConfig
 import app.pulsecast.data.Card
+import app.pulsecast.data.Issue
 import app.pulsecast.share.ShareCard
 import java.time.Duration
 import java.time.Instant
@@ -92,6 +95,9 @@ fun FeedScreen(vm: FeedViewModel) {
     val listState = rememberLazyListState()
     var showSettings by remember { mutableStateOf(false) }
     var showPro by rememberSaveable { mutableStateOf(false) }
+    // Weekly deep-dive: an issue's week, or "all" for the list.
+    var showWeekly by rememberSaveable { mutableStateOf<String?>(null) }
+    var askCard by remember { mutableStateOf<Card?>(null) }
 
     LaunchedEffect(s.tab, s.topic, s.searching) { listState.scrollToItem(0) }
     LaunchedEffect(listState) {
@@ -99,7 +105,11 @@ fun FeedScreen(vm: FeedViewModel) {
     }
 
     if (showPro) {
-        ProScreen(onClose = { showPro = false })
+        ProScreen(vm, s, onClose = { showPro = false })
+        return
+    }
+    showWeekly?.let { week ->
+        WeeklyScreen(s.issues, s.issues.firstOrNull { it.weekOf == week }, onClose = { showWeekly = null })
         return
     }
 
@@ -109,15 +119,19 @@ fun FeedScreen(vm: FeedViewModel) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.app_name), color = Text1, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 26.sp)
             Spacer(Modifier.width(10.dp))
-            Text(
-                "Try PRO",
-                color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(1.dp, Accent, RoundedCornerShape(14.dp))
-                    .clickable { showPro = true }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            if (s.pro) {
+                Box(Modifier.clickable { showPro = true }) { ProBadge() }
+            } else {
+                Text(
+                    "Try PRO",
+                    color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, Accent, RoundedCornerShape(14.dp))
+                        .clickable { showPro = true }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { vm.setSearching(!s.searching) }) {
                 Icon(if (s.searching) Icons.Filled.Close else Icons.Filled.Search, if (s.searching) "Close search" else "Search", tint = Text2)
@@ -146,7 +160,7 @@ fun FeedScreen(vm: FeedViewModel) {
             Text(it, color = Text2, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
         }
         if (!s.searching) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Tab.entries.forEach { tab ->
+            vm.visibleTabs(s).forEach { tab ->
                 val on = s.tab == tab
                 Text(
                     tab.label,
@@ -180,6 +194,7 @@ fun FeedScreen(vm: FeedViewModel) {
                                 s.searching && s.query.isNotBlank() -> "No stories match \"${s.query.trim()}\"."
                                 s.searching -> "Search headlines, companies, models and sources."
                                 s.tab == Tab.SAVED -> "Tap the star on any story to keep it here."
+                                s.tab == Tab.FOLLOWING -> "No recent stories match what you follow yet. New ones will appear here."
                                 else -> "No stories yet. Pull down to refresh."
                             },
                             color = Text2, modifier = Modifier.padding(24.dp),
@@ -195,12 +210,19 @@ fun FeedScreen(vm: FeedViewModel) {
                             onSave = { vm.toggleSave(row.card) },
                             onShare = { vm.shared(row.card) },
                             onRead = { vm.readSource(row.card) },
+                            pro = s.pro,
+                            field = s.field,
+                            onPickField = vm::setField,
+                            onPro = { showPro = true },
+                            onAsk = { if (s.pro) { askCard = row.card } else { showPro = true } },
                         )
+                        is Row.Weekly -> WeeklyBanner(row.issue, s.pro) { if (s.pro) { showWeekly = row.issue.weekOf } else { showPro = true } }
+                        is Row.ArchiveNote -> ArchiveNote(row.text, row.upsell) { showPro = true }
                         is Row.Ad -> SponsoredPost(vm, row.slot, s.adsVersion)
                         is Row.CaughtUp -> CaughtUp(row.newCount)
                     }
                 }
-                if (rows.isNotEmpty() && s.tab != Tab.SAVED) item(key = "end") { EndOfFeed() }
+                if (rows.isNotEmpty() && s.tab != Tab.SAVED && s.tab != Tab.FOLLOWING && !s.searching) item(key = "end") { EndOfFeed() }
             }
         }
     }
@@ -208,8 +230,26 @@ fun FeedScreen(vm: FeedViewModel) {
 
     if (showSettings) {
         ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = CardBg, contentColor = Text1) {
-            Settings(s, vm, onPro = { showSettings = false; showPro = true })
+            Settings(s, vm, onPro = { showSettings = false; showPro = true }, onWeekly = { showSettings = false; showWeekly = "all" })
         }
+    }
+
+    askCard?.let { card -> AskSheet(card, vm, onDismiss = { askCard = null }) }
+}
+
+@Composable
+private fun ArchiveNote(text: String, upsell: Boolean, onPro: () -> Unit) {
+    if (upsell) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Raised).clickable(onClick = onPro).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text, color = Text1, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            ProBadge()
+        }
+    } else {
+        Text(text, color = Text2, fontSize = 11.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     }
 }
 
@@ -228,7 +268,19 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun PostCard(card: Card, saved: Boolean, onOpen: () -> Unit, onSave: () -> Unit, onShare: () -> Unit, onRead: () -> Unit) {
+fun PostCard(
+    card: Card,
+    saved: Boolean,
+    onOpen: () -> Unit,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+    onRead: () -> Unit,
+    pro: Boolean = false,
+    field: String? = null,
+    onPickField: (String?) -> Unit = {},
+    onPro: () -> Unit = {},
+    onAsk: () -> Unit = {},
+) {
     var expanded by rememberSaveable(card.id) { mutableStateOf(false) }
     val uri = LocalUriHandler.current
     val context = LocalContext.current
@@ -275,6 +327,8 @@ fun PostCard(card: Card, saved: Boolean, onOpen: () -> Unit, onSave: () -> Unit,
             card.keyPoints.forEach { Text("•  $it", color = Text1, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(vertical = 3.dp)) }
             if (card.context.isNotBlank()) Detail("Context", card.context)
             if (card.whatNext.isNotBlank()) Detail("What's next", card.whatNext)
+            ForYouBox(card, pro, field, onPickField, onPro)
+            AskButton(pro, onAsk)
             if (card.alsoCoveredBy.isNotEmpty()) {
                 Text("ALSO COVERED BY", color = Text2, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp, modifier = Modifier.padding(top = 12.dp))
                 Text(card.alsoCoveredBy.joinToString("  ·  ") { it.name }, color = Text2, fontSize = 13.sp)
@@ -344,10 +398,10 @@ private fun EndOfFeed() {
 }
 
 @Composable
-private fun Settings(s: FeedState, vm: FeedViewModel, onPro: () -> Unit) {
+private fun Settings(s: FeedState, vm: FeedViewModel, onPro: () -> Unit, onWeekly: () -> Unit) {
     val activity = LocalContext.current as? Activity
     val uri = LocalUriHandler.current
-    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
         Text("Settings", fontFamily = FontFamily.Serif, fontSize = 24.sp, color = Text1)
         Row(
             Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Raised).clickable(onClick = onPro).padding(14.dp),
@@ -359,9 +413,20 @@ private fun Settings(s: FeedState, vm: FeedViewModel, onPro: () -> Unit) {
                     Spacer(Modifier.width(6.dp))
                     ProBadge()
                 }
-                Text("No ads, ask about any story, instant alerts and more.", color = Text2, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(
+                    if (s.pro) "Active. Thanks for supporting Prompt." else "No ads, ask about any story, follow anything and more.",
+                    color = Text2, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
+                )
             }
-            Text("See plans", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (s.pro) "Details" else "See plans", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (s.pro) {
+            FieldPicker(s, vm)
+            FollowingSection(s, vm)
+            Toggle("Alerts for stories you follow", "Checked every 15 minutes. Never at night.", s.followAlerts, vm::setFollowAlerts)
+            TextButton(onClick = onWeekly, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Weekly deep-dives" + if (s.issues.isNotEmpty()) " (${s.issues.size})" else "", color = Accent)
+            }
         }
         Text("Appearance", color = Text1, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -377,6 +442,10 @@ private fun Settings(s: FeedState, vm: FeedViewModel, onPro: () -> Unit) {
             "Every story is summarised by AI from the linked article, and links to its source. Check the source before relying on a detail.",
             color = Text2, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 8.dp),
         )
+        // Only in builds installed from Android Studio; never in the Play Store version.
+        if (BuildConfig.DEBUG) {
+            Toggle("Unlock Pro for testing", "Debug builds only. Turns on every Pro feature without paying.", s.debugUnlock, vm::setDebugUnlock)
+        }
     }
 }
 

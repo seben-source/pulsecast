@@ -3,13 +3,14 @@ import { createHash } from "node:crypto";
 import { SOURCES } from "./sources.mjs";
 import { parseFeed, parseHn, parseHfPapers, parseGithub, extractArticle, extractImage } from "./parse.mjs";
 import { canonicalUrl, looksAboutAi, cluster, heat, cardType, similar, mergeDuplicateCards, applyGroups } from "./curate.mjs";
-import { writeCard, findDuplicateGroups } from "./writer.mjs";
+import { writeCard, findDuplicateGroups, writeAngles } from "./writer.mjs";
 
 export const FEED_VERSION = 1;
 const MAX_AGE_DAYS = 10;
 const MAX_CARDS = 400;
 const FRESH_HOURS = 72; // new stories must be newer than this
 const BACKFILL_IMAGES = 30; // earlier cards given a picture per run
+const BACKFILL_ANGLES = 15; // earlier cards given "What it means for you" lines per run
 const PER_SOURCE = 3; // most new cards from one source per run
 const SKIP_MEMORY_DAYS = 4; // declined stories aren't re-sent to Claude for this long
 const UA = "Prompt/1.0 (AI news reader; +https://github.com/seben-source/pulsecast)";
@@ -207,6 +208,22 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
       c.image = null; // tried; don't retry every run
     }
   });
+  // Cards from before "What it means for you" existed: add the lines, hottest first.
+  // A failed request leaves the card for next run; null means "no field applies".
+  const noAngles = prevCards
+    .filter((c) => c.forYou === undefined && now - Date.parse(c.publishedAt) < MAX_AGE_DAYS * 86_400_000)
+    .sort((a, b) => (b.heat ?? 0) - (a.heat ?? 0))
+    .slice(0, BACKFILL_ANGLES);
+  let anglesAdded = 0;
+  await mapLimit(noAngles, 4, async (c) => {
+    try {
+      c.forYou = await writeAngles(c, model);
+      anglesAdded++;
+    } catch (e) {
+      log(`angles failed for ${c.id}: ${e.message}`);
+    }
+  });
+
   const ids = new Set();
   const cutoff = now - MAX_AGE_DAYS * 86_400_000;
   let merged = mergeDuplicateCards([...newCards, ...prevCards]);
@@ -241,6 +258,6 @@ export async function buildFeed({ items, previous, model, fetchImpl, now = Date.
       dedupedAt: new Date(now).toISOString(),
       skipped: [...skipped].map(([u, at]) => ({ u, at })).slice(-1500),
     },
-    stats: { items: items.length, fresh: fresh.length, stories: stories.length, newStories: newStories.length, written: newCards.length, declined: toWrite.length - newCards.length, reasons, sameStoryGroups: dedupeGroups, total: cards.length },
+    stats: { items: items.length, fresh: fresh.length, stories: stories.length, newStories: newStories.length, written: newCards.length, declined: toWrite.length - newCards.length, reasons, sameStoryGroups: dedupeGroups, anglesAdded, total: cards.length },
   };
 }
